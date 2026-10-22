@@ -1,0 +1,7 @@
+jaffle_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      threads: 4
+      path: warehouse.duckdb
