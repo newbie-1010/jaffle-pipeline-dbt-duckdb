@@ -1,3 +1,4 @@
+$content = @"
 .venv/
 warehouse.duckdb
 warehouse.duckdb.wal
@@ -6,3 +7,6 @@ logs/
 dbt_packages/
 __pycache__/
 .user.yml
+"@
+[System.IO.File]::WriteAllText(".gitignore", $content, (New-Object
+System.Text.UTF8Encoding.$false))
