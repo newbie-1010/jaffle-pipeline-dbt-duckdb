@@ -1,8 +1,8 @@
 # Jaffle Pipeline: dbt + DuckDB ELT Project
 
-A beginner-friendly, end-to-end data engineering project that runs entirely on a laptop at **zero cost**.
+A data engineering project that runs entirely on a laptop at **zero cost**.
 
-A Python script loads raw e-commerce CSV files into **DuckDB** incrementally, validating them on the way in. **dbt** then transforms the raw data into clean, tested, documented analytics tables, and monitors how fresh the source data is.
+A Python script loads raw e-commerce CSV files into **DuckDB** incrementally, validating them on the way in. **dbt** then transforms the raw data into clean, tested, documented analytics tables and monitors how fresh the source data is. The final mart tables are also exported as **Parquet** files.
 
 ---
 
@@ -19,13 +19,12 @@ A Python script loads raw e-commerce CSV files into **DuckDB** incrementally, va
 9. [Data quality and testing](#data-quality-and-testing)
 10. [Incremental ingestion](#incremental-ingestion)
 11. [Source freshness monitoring](#source-freshness-monitoring)
-12. [Viewing the documentation](#viewing-the-documentation)
-13. [Example queries](#example-queries)
-14. [Design decisions](#design-decisions)
-15. [Troubleshooting](#troubleshooting)
-16. [Roadmap](#roadmap)
-17. [What I learned](#what-i-learned)
-18. [Acknowledgements](#acknowledgements)
+12. [Parquet export](#parquet-export)
+13. [Viewing the documentation](#viewing-the-documentation)
+14. [Example queries](#example-queries)
+15. [Design decisions](#design-decisions)
+16. [Troubleshooting](#troubleshooting)
+17. [Acknowledgements](#acknowledgements)
 
 ---
 
@@ -40,9 +39,10 @@ A Python script loads raw e-commerce CSV files into **DuckDB** incrementally, va
 - Modeling data as a star schema (fact and dimension tables)
 - Testing and documenting transformations
 - Monitoring **source freshness** so stale data is caught early
+- Exporting the final tables to **Parquet**, a columnar file format
 - Making the whole pipeline reproducible with a single command
 
-**Business scenario:** *Jaffle Shop* is a fictional e-commerce store. The pipeline answers questions such as:
+**Business scenario:** *Jaffle Shop* is a fictional e-commerce store. The marts can answer questions such as:
 
 - How much has each customer spent in total?
 - When did each customer first and most recently order?
@@ -60,6 +60,8 @@ flowchart LR
     C --> D[dbt staging<br/>views]
     D --> E[dbt marts<br/>fct_orders, dim_customers]
     E --> F[dbt tests<br/>+ docs]
+    E --> H[export_parquet.py]
+    H --> I[Parquet files<br/>exports/]
 ```
 
 | Layer | Location | Purpose | Materialization |
@@ -67,8 +69,9 @@ flowchart LR
 | **Raw** | DuckDB `raw` schema | Data as received, plus a UTC load timestamp and an ingest log | Table (loaded incrementally by Python) |
 | **Staging** | `models/staging` | Rename columns, fix units, no joins | View |
 | **Marts** | `models/marts` | Business-ready fact and dimension tables | Table |
+| **Exports** | `exports/` | Mart tables written as Parquet files | Files |
 
-Keeping the layers separate means a transformation mistake never corrupts the original data, and each layer has one clear job.
+Keeping the layers separate means transformations never modify the raw data, and each layer has one job.
 
 ---
 
@@ -76,13 +79,14 @@ Keeping the layers separate means a transformation mistake never corrupts the or
 
 | Tool | Role |
 |---|---|
-| **Python 3.10+** | Incremental ingestion script and validation |
+| **Python 3.10+** | Incremental ingestion, validation, and Parquet export |
 | **DuckDB** | Embedded analytics database (a single file, no server needed) |
 | **dbt (dbt-duckdb)** | SQL transformations, tests, freshness checks, and documentation |
+| **Parquet** | Columnar output format for the mart tables |
 | **SQL** | Transformation logic |
 | **Git / GitHub** | Version control |
 
-Developed and tested on Windows 11 with PowerShell, Python 3.14, and dbt-duckdb adapter 1.11.
+Commands in this README are written for Windows PowerShell.
 
 ---
 
@@ -106,8 +110,10 @@ Order `status` values: `placed`, `shipped`, `completed`, `return_pending`, `retu
 jaffle_pipeline/
 ├── data/
 │   └── raw/                      # Source CSV files
+├── exports/                      # Parquet output (generated)
 ├── ingest/
-│   └── ingest.py                 # Incremental extract + load + validate
+│   ├── ingest.py                 # Incremental extract + load + validate
+│   └── export_parquet.py         # Export mart tables to Parquet
 ├── models/
 │   ├── staging/
 │   │   ├── sources.yml           # Raw tables as dbt sources + freshness rules
@@ -122,6 +128,7 @@ jaffle_pipeline/
 │   └── assert_no_negative_amounts.sql   # Custom data test
 ├── dbt_project.yml               # dbt project configuration
 ├── profiles.yml                  # dbt connection to DuckDB
+├── query_parquet.py              # Example queries on the Parquet files
 ├── requirements.txt              # Python dependencies
 ├── run.ps1                       # One-command pipeline runner
 └── README.md
@@ -196,21 +203,19 @@ git --version
 
 ### Installation
 
-```powershell
-# 1. Clone the repository
-git clone https://github.com/newbie-1010/jaffle-pipeline-dbt-duckdb.git
-cd jaffle-pipeline-dbt-duckdb
+Open a terminal in the project folder (the folder that contains `dbt_project.yml`), then run:
 
-# 2. Create a virtual environment
+```powershell
+# 1. Create a virtual environment
 py -m venv .venv
 
-# 3. Allow PowerShell to run the activation script (one time only)
+# 2. Allow PowerShell to run the activation script (one time only)
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
-# 4. Activate the environment
+# 3. Activate the environment
 .\.venv\Scripts\Activate.ps1
 
-# 5. Install dependencies
+# 4. Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -245,6 +250,8 @@ dbt source freshness
 if ($LASTEXITCODE -ne 0) { exit 1 }
 dbt build
 if ($LASTEXITCODE -ne 0) { exit 1 }
+python ingest\export_parquet.py
+if ($LASTEXITCODE -ne 0) { exit 1 }
 dbt docs generate
 ```
 
@@ -260,7 +267,10 @@ dbt source freshness
 # 3. Transform and test: builds staging views, mart tables, and runs all tests
 dbt build
 
-# 4. Generate documentation
+# 4. Export the mart tables to Parquet
+python ingest\export_parquet.py
+
+# 5. Generate documentation
 dbt docs generate
 ```
 
@@ -305,7 +315,7 @@ Validation runs on the incoming file **before** any raw table is modified, so a 
 | `accepted_values` | `fct_orders.status` | Status only holds expected values |
 | Custom test | `assert_no_negative_amounts.sql` | No order has a negative amount |
 
-Ingestion and transformation both check the data on purpose. In real teams they are often owned separately, so each side guards itself.
+Ingestion and transformation both check the data on purpose, so each stage guards itself.
 
 ---
 
@@ -320,10 +330,10 @@ Ingestion and transformation both check the data on purpose. In real teams they 
 | **Atomic write** | The delete and insert for a table run in one transaction, so a failure rolls back cleanly. |
 | **Audit log** | Every run writes to `raw._ingest_log`: table, file hash, rows read, inserted, updated, and status (`loaded` or `skipped`). |
 
-Example output:
+Example output from a test run on a small sample file (one row edited, one row added):
 
 ```text
-customers: 1 inserted, 1 updated, 98 unchanged
+customers: 1 inserted, 1 updated, 2 unchanged
 orders: file unchanged, skipped
 payments: file unchanged, skipped
 ```
@@ -369,16 +379,80 @@ dbt source freshness
 
 ---
 
-## Viewing the documentation
+## Parquet export
 
-```powershell
-dbt docs generate
-dbt docs serve
+After `dbt build`, `ingest/export_parquet.py` writes the two mart tables to Parquet files in `exports/`. Parquet is a columnar format that stores each column together with its type and supports compression.
+
+```python
+"""Export dbt mart tables from DuckDB to Parquet files."""
+from pathlib import Path
+
+import duckdb
+
+DB_PATH = "warehouse.duckdb"
+OUT_DIR = Path("exports")
+TABLES = ["fct_orders", "dim_customers"]
+
+
+def main() -> None:
+    OUT_DIR.mkdir(exist_ok=True)
+    con = duckdb.connect(DB_PATH, read_only=True)
+    try:
+        for table in TABLES:
+            out = (OUT_DIR / f"{table}.parquet").as_posix()
+            con.execute(f"COPY (SELECT * FROM {table}) TO '{out}' (FORMAT parquet, COMPRESSION zstd)")
+            rows = con.execute(f"SELECT count(*) FROM read_parquet('{out}')*).fetchone()[0]
+            size_k* = (OUT_DIR / f"{table}.parquet").*tat().st_size / 1024
+            p*int(f"{table}: {rows} rows -> {out* ({size_kb:.1f} KB)")
+    finally:*        con.close()
+
+
+if __name__ *= "__main__":
+    main()
 ```
 
-Open `http://localhost:8080` in your browser. You will see:
+| De*ail | Explanation |
+|---|---|
+| `C*PY (SELECT ...) TO '...' (FORMAT p*rquet)` | DuckDB's export statemen*, which writes the query result st*aight to a Parquet file |
+| `COMPR*SSION zstd` | Sets the compression*codec |
+| `read_only=True` | The s*ript only reads the database, so i* cannot change any table |
+| Read-*ack count | Each file is read after writing, so a broken file fails the run immediately |
 
-- A description of every model and column
+Run it on its own:
+
+```powershell
+python ingest\export_parquet.py
+```
+
+### Querying the Parquet files
+
+DuckDB can query Parquet files directly, without loading them into a table. `query_parquet.py` runs three example queries (revenue by status, the five largest orders with customer names, and the Parquet schema):
+
+```powershell
+python query_parquet.py
+```
+
+```python
+import duckdb
+
+print(duckdb.sql("""
+    select status, count(*) as orders, sum(amount) as revenue
+    from 'exports/fct_orders.parquet'
+    group by status
+"""))
+
+print(duckdb.sql("""
+    select d.first_name, f.amount
+    from 'exports/fct_orders.parquet' f
+    join 'exports/dim_customers.parquet' d using (customer_id)
+    order by f.amount desc
+    limit 5
+"""))
+
+print(duckdb.sql("select name, type from parquet_schema('exports/fct_orders.parquet')"))
+```
+
+The queries live in a d column
 - The tests attached to each column
 - A **lineage graph** (click the graph icon in the bottom-right corner) showing `raw sources → staging → marts`
 
@@ -425,7 +499,7 @@ where number_of_orders = 0;
 
 ## Design decisions
 
-**Sources instead of seeds.** dbt *seeds* are small CSVs that dbt loads itself, which suits lookup lists. Raw operational data is better treated as a *source*, a table that already exists because another process loaded it. Here, Python plays the role of that upstream loader, which mirrors real pipelines.
+**Sources instead of seeds.** dbt *seeds* are small CSVs that dbt loads itself, which suits lookup lists. Raw data is treated as a *source*, a table that already exists because another process loaded it. Here, Python is that upstream loader.
 
 **ELT instead of ETL.** Raw data is loaded first and transformed inside the database with SQL. This keeps the original data intact and makes transformations easy to re-run.
 
@@ -436,6 +510,8 @@ where number_of_orders = 0;
 **UTC timestamps.** `_loaded_at` is stored as a UTC timestamp so freshness checks behave the same on any machine.
 
 **Views for staging, tables for marts.** Staging models are light and cheap, so views suffice. Marts are what people query, so they are stored as tables for fast reads.
+
+**Parquet export as a separate step.** The marts stay normal DuckDB tables, and a small script writes them to Parquet after `dbt build`. This keeps dbt models simple and lets the export fail on its own without affecting the models.
 
 **Local-first.** DuckDB is a single-file embedded database, so the whole project runs with no cloud account, server, or cost.
 
@@ -456,34 +532,13 @@ where number_of_orders = 0;
 | Ingestion says `file unchanged, skipped` but you expected a load | The file content is identical to the last load | Edit and save the CSV, or run `python ingest\ingest.py --full-refresh` |
 | Error after changing CSV columns | The raw table has the old schema | Run `python ingest\ingest.py --full-refresh` |
 | `dbt source freshness` shows `WARN` or `ERROR` | No new or changed rows for over 24 or 72 hours | Load fresh data, or adjust the thresholds in `sources.yml` |
-
----
-
-## Roadmap
-
-- [x] Make ingestion **incremental** (file hashing, row-level upsert, ingest log)
-- [x] Add `dbt source freshness` checks
-- [ ] Export mart tables to **Parquet** using DuckDB's `COPY ... TO`
-- [ ] Add a **GitHub Actions** workflow that runs `dbt build` on every push
-- [ ] Build a dashboard on `dim_customers` with Metabase or Streamlit
-- [ ] Orchestrate the pipeline with Apache Airflow
-
----
-
-## What I learned
-
-- How the **ELT pattern** works and why raw, staging, and marts layers are kept separate
-- Loading CSVs into DuckDB and validating data at ingestion
-- Core dbt concepts: **sources, `ref()`, materializations, tests, and docs**
-- **Star-schema** modeling with fact and dimension tables
-- Writing idempotent, reproducible pipelines
-- Designing **incremental loads** with change detection, upserts, and audit logging
-- Monitoring data with **source freshness** checks
-- Debugging real environment issues, including PowerShell execution policy and file-encoding errors
+| `Table with name fct_orders does not exist` during export | `dbt build` has not run or the marts failed | Run `dbt build` and fix any errors first |
+| `The term '*' is not recognized` from a `python -c` command | PowerShell splits the command at nested quotes | Put the query in a `.py` file, such as `query_parquet.py` |
+| Parquet file not found in `query_parquet.py` | The export has not run | Run `python ingest\export_parquet.py` |
 
 ---
 
 ## Acknowledgements
 
-- Sample data and project inspiration: [dbt-labs/jaffle_shop_duckdb](https://github.com/dbt-labs/jaffle_shop_duckdb)
-- [dbt](https://www.getdbt.com/) and [DuckDB](https://duckdb.org/)
+- Sample data and project inspiration: https://github.com/dbt-labs/jaffle_shop_duckdb
+- https://www.getdbt.com/ and [DuckDB](https://duckdb.org/)
